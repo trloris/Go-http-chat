@@ -2,11 +2,10 @@ package main
 
 import (
 	"net/http"
-	"os"
-	"bufio"
 	"container/list"
 	"time"
 	"io"
+	"io/ioutil"
 )
 
 func handler (w http.ResponseWriter, r *http.Request, clients *list.List) {
@@ -14,7 +13,7 @@ func handler (w http.ResponseWriter, r *http.Request, clients *list.List) {
 	select {
 	case <-time.After(60e9):
 		clients.Remove(res)
-		io.WriteString(w, "timeout")
+		http.Error(w, http.StatusText(408), 408)
 	case r := <-res.Value.(chan string):
 		clients.Remove(res)
 		io.WriteString(w, r)
@@ -30,22 +29,21 @@ func responder (clients *list.List, c chan string) {
 	}
 }
 
-func getString (c chan string) {
-	reader := bufio.NewReader(os.Stdin)
-	for {
-		thing, _ := reader.ReadString('\n')
-		c <- thing
-	}
+func enterChat (w http.ResponseWriter, r *http.Request, c chan string) {
+	body, _ := ioutil.ReadAll(r.Body)
+	c <- string(body)
 }
 
-func main() {
+func main () {
 	responses := make(chan string)
 	clients := list.New()
 	http.Handle("/", http.FileServer(http.Dir("./static/")))
-	http.HandleFunc("/thing", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/chat", func(w http.ResponseWriter, r *http.Request) {
 		handler(w, r, clients)
 	})
-	go getString(responses)
+	http.HandleFunc("/chatentry", func(w http.ResponseWriter, r *http.Request) {
+		enterChat(w, r, responses)
+	})
 	go responder(clients, responses)
 	http.ListenAndServe("0.0.0.0:8080", nil)
 }
